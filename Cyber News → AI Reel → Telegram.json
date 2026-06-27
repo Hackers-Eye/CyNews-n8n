@@ -1,0 +1,398 @@
+{
+  "name": "Cyber News → AI Reel → Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "aee8d196-2a4f-4016-97c6-f4108da3c6e7",
+      "name": "Daily 9AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://feeds.feedburner.com/TheHackersNews",
+        "options": {}
+      },
+      "id": "9972da71-f231-4495-abc3-a89200bedb84",
+      "name": "Read Cyber News",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        224,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (!items.length) { return []; }\nconst a = items[0].json;\nconst strip = (s) => (s || '').toString().replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();\nreturn [{\n  json: {\n    title: strip(a.title).slice(0, 200),\n    summary: strip(a.contentSnippet || a.content || a.description).slice(0, 1200),\n    link: a.link || '',\n    pubDate: a.pubDate || a.isoDate || '',\n  },\n}];"
+      },
+      "id": "fce5c490-d68d-464d-9557-3d71193308ef",
+      "name": "Pick Latest Article",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-2.5-flash",
+          "cachedResultName": "gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=TITLE: {{ $json.title }}\n\nSUMMARY: {{ $json.summary }}\n\nSOURCE: {{ $json.link }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "systemMessage": "You are a social media scriptwriter for a cybersecurity channel. Given a news article, write a punchy 30-second vertical-video voiceover script (about 70-90 words, spoken, no stage directions) and a separate social caption with 3-5 relevant hashtags. Respond ONLY with minified JSON of the form {\"script\":\"...\",\"caption\":\"...\",\"title\":\"...\"} and nothing else.",
+          "maxOutputTokens": 1024,
+          "temperature": 0.7
+        }
+      },
+      "id": "4ba6f203-6454-4e79-b4f4-dfdb60dddd1d",
+      "name": "Gemini Write Script",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        80
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "VMaXyMFHfJZgPV8M",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const c = $json.content;\nlet raw;\nif (typeof c === 'string') {\n  raw = c;\n} else if (c && c.parts && c.parts[0] && c.parts[0].text) {\n  raw = c.parts[0].text;\n} else if (c && c[0] && c[0].text) {\n  raw = c[0].text;\n} else {\n  raw = $json.text || '{}';\n}\nraw = raw.replace(/```json/gi, '').replace(/```/g, '').trim();\nlet parsed;\ntry {\n  const match = raw.match(/\\{[\\s\\S]*\\}/);\n  parsed = JSON.parse(match ? match[0] : raw);\n} catch (e) {\n  parsed = { script: raw, caption: '', title: '' };\n}\nconst src = $('Pick Latest Article').first().json;\nreturn [{\n  json: {\n    script: (parsed.script || '').toString().trim(),\n    caption: (parsed.caption || '').toString().trim(),\n    title: (parsed.title || src.title || 'Cyber News').toString().trim(),\n    link: src.link || '',\n  },\n}];"
+      },
+      "id": "df7344e0-2fae-48f6-91e7-3a6df9c14d48",
+      "name": "Parse Script JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.json2video.com/v2/movies",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ resolution: \"instagram-story\", quality: \"high\", scenes: [ { comment: \"main\", elements: [ { type: \"text\", text: $json.title, style: \"005\", position: \"center-center\", start: 0, duration: 3 }, { type: \"voice\", text: $json.script, voice: \"en-US-AriaNeural\" } ] } ] }) }}",
+        "options": {}
+      },
+      "id": "fc4f9107-d94e-4e8b-9d02-15fe86e614f8",
+      "name": "JSON2Video Submit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        80
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "lGLrYJ0yiVyPRXg2",
+          "name": "Header Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "2a79e3b9-8258-4e2b-b1fc-8f585e456f30",
+      "name": "Wait 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1344,
+        80
+      ],
+      "webhookId": "79cbc2f4-7054-4044-8b4e-c2770fee926b"
+    },
+    {
+      "parameters": {
+        "url": "https://api.json2video.com/v2/movies",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "project",
+              "value": "={{ $(\"JSON2Video Submit\").item.json.project }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4134ccbe-59c3-49f4-9502-b8e657032991",
+      "name": "JSON2Video Poll",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1568,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "lGLrYJ0yiVyPRXg2",
+          "name": "Header Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "status-done",
+              "leftValue": "={{ $json.movie.status }}",
+              "rightValue": "done",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d4d22939-7c20-4dd4-86b0-f6f7d8c4b3ac",
+      "name": "Render Done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1792,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const movie = $json.movie || {};\nif (movie.status !== 'done' || !movie.url) {\n  throw new Error('Video render did not complete: ' + JSON.stringify(movie));\n}\nconst s = $('Parse Script JSON').first().json;\nreturn [{\n  json: {\n    video_url: movie.url,\n    caption: s.caption || s.title,\n    title: s.title,\n  },\n}];"
+      },
+      "id": "709c9a98-b1b9-4ed4-a344-7006434cdd29",
+      "name": "Prep Publish",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendVideo",
+        "chatId": "6955886647",
+        "file": "={{ $json.video_url }}",
+        "additionalFields": {
+          "caption": "={{ $json.caption }}"
+        }
+      },
+      "id": "546c3028-f9f0-47ce-bf3c-029d200e0bcd",
+      "name": "Telegram Post",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2240,
+        80
+      ],
+      "webhookId": "d1912f75-b595-4945-b3ab-94d77c767916",
+      "credentials": {
+        "telegramApi": {
+          "id": "BaumifgFFEZAsHSL",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1504,
+        288
+      ],
+      "typeVersion": 1,
+      "id": "dd1b9d02-4504-4974-b70b-1bc8e60343b1",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1504,
+        288
+      ],
+      "typeVersion": 1,
+      "id": "4ba2d33a-7946-446b-b2a6-21031a71d74e",
+      "name": "Sticky Note1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily 9AM": {
+      "main": [
+        [
+          {
+            "node": "Read Cyber News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Cyber News": {
+      "main": [
+        [
+          {
+            "node": "Pick Latest Article",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Latest Article": {
+      "main": [
+        [
+          {
+            "node": "Gemini Write Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Write Script": {
+      "main": [
+        [
+          {
+            "node": "Parse Script JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Script JSON": {
+      "main": [
+        [
+          {
+            "node": "JSON2Video Submit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JSON2Video Submit": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s": {
+      "main": [
+        [
+          {
+            "node": "JSON2Video Poll",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JSON2Video Poll": {
+      "main": [
+        [
+          {
+            "node": "Render Done?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render Done?": {
+      "main": [
+        [
+          {
+            "node": "Prep Publish",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Publish": {
+      "main": [
+        [
+          {
+            "node": "Telegram Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7d3342d6-3d4c-45a4-afec-4e58720c4489",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "610404a1ac79244192d14117c5d9a02a35c8d180e6a4163cc71a07f8bf5fc8fa"
+  },
+  "nodeGroups": [],
+  "id": "dOkHIk024D9mqTUv",
+  "tags": []
+}
