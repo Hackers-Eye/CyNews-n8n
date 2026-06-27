@@ -1,25 +1,88 @@
 # 📡 Cyber News → AI Reel → Telegram
 
-An n8n workflow that automatically fetches the latest cybersecurity news every morning, generates a short AI voiceover video, and posts it directly to a Telegram channel — fully hands-free.
+An n8n workflow that automatically fetches the latest cybersecurity news every morning, generates a short AI voiceover video, and posts it to a Telegram channel — fully hands-free.
 
 ---
 
-## 🔄 How It Works
+## 🔄 Pipeline Flowchart
+
+> Step-by-step execution flow, including the polling loop for video rendering.
 
 ```
-Daily 9AM → RSS Feed → Pick Article → Gemini Script → JSON2Video Render → Telegram Post
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│  Daily 9AM  │───▶│ Cyber News  │───▶│ Pick Article│───▶│ Gemini 2.5  │───▶│ Parse JSON  │
+│  Scheduler  │    │  RSS Feed   │    │ Strip HTML  │    │ Write Script│    │ Clean output│
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └──────┬──────┘
+                                                                                    │
+              ┌─────────────────────────────────────────────────────────────────────┘
+              │
+              ▼
+       ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+       │Video Submit │───▶│  Wait 30s   │───▶│ Video Poll  │
+       │  POST API   │    │    Pause    │    │  GET status │
+       └─────────────┘    └─────────────┘    └──────┬──────┘
+                                                     │
+                                              ┌──────▼──────┐
+                                    ┌─false───│ Render done?│
+                                    │         │check status │
+                                    │         └──────┬──────┘
+                                    │                │ true
+                                    ▼                ▼
+                               (loop back)    ┌─────────────┐    ┌─────────────┐
+                               to Wait 30s    │Prep Publish │───▶│Telegram Post│
+                                              │Extract URL  │    │Send video   │
+                                              └─────────────┘    └─────────────┘
 ```
 
-| Step | Node | Description |
-|------|------|-------------|
-| 1 | **Daily 9AM** | Schedule trigger fires at 09:00 every day |
-| 2 | **Read Cyber News** | Fetches latest feed from [The Hacker News](https://thehackernews.com) via RSS |
-| 3 | **Pick Latest Article** | Strips HTML, extracts title, summary, link, and pub date |
-| 4 | **Gemini Write Script** | Uses Gemini 2.5 Flash to write a 70–90 word voiceover script + social caption |
-| 5 | **Parse Script JSON** | Cleans and parses Gemini's JSON response safely |
-| 6 | **JSON2Video Submit** | Renders a vertical (Instagram Story) video with text overlay + AI voice |
-| 7 | **Wait + Poll Loop** | Waits 30s, then polls JSON2Video until render status is `done` |
-| 8 | **Telegram Post** | Sends the finished video + caption to your Telegram channel |
+---
+
+## 🏗️ Architecture Diagram
+
+> The three logical layers and the external services involved.
+
+```
+┌──────────────────────┐   ┌──────────────────────────┐   ┌──────────────────────┐
+│    DATA SOURCES      │   │      AI PROCESSING        │   │    DISTRIBUTION      │
+│                      │   │                           │   │                      │
+│  ┌────────────────┐  │   │  ┌────────────────────┐  │   │  ┌────────────────┐  │
+│  │  Hacker News   │  │   │  │  Gemini 2.5 Flash  │  │   │  │  Telegram Bot  │  │
+│  │   RSS feed     │──┼───┼─▶│  Script + caption  │──┼───┼─▶│  sendVideo API │  │
+│  └────────────────┘  │   │  └─────────┬──────────┘  │   │  └───────┬────────┘  │
+│                      │   │            │              │   │          │           │
+│  ┌────────────────┐  │   │  ┌─────────▼──────────┐  │   │  ┌───────▼────────┐  │
+│  │ n8n Scheduler  │  │   │  │    JSON2Video       │  │   │  │Channel / Chat  │  │
+│  │  Cron 9AM      │  │   │  │  Render + AI voice  │  │   │  │ End audience   │  │
+│  └────────────────┘  │   │  └─────────┬──────────┘  │   │  └────────────────┘  │
+│                      │   │            │              │   │                      │
+└──────────────────────┘   │  ┌─────────▼──────────┐  │   └──────────────────────┘
+                           │  │   Aria Neural       │  │
+                           │  │  en-US voiceover    │  │
+                           │  └────────────────────┘  │
+                           └──────────────────────────┘
+
+         ╔══════════════════════════════════════════════════════════════════╗
+         ║           n8n orchestration layer                               ║
+         ║   Coordinates all nodes, handles polling loop and error routing ║
+         ╚══════════════════════════════════════════════════════════════════╝
+```
+
+---
+
+## 📋 Node Reference
+
+| Step | Node | Type | Description |
+|------|------|------|-------------|
+| 1 | **Daily 9AM** | Schedule Trigger | Fires at 09:00 every day |
+| 2 | **Read Cyber News** | RSS Feed Read | Fetches [The Hacker News](https://thehackernews.com) |
+| 3 | **Pick Latest Article** | Code (JS) | Strips HTML, extracts title, summary, link, date |
+| 4 | **Gemini Write Script** | Google Gemini | Generates 70–90 word voiceover script + caption as JSON |
+| 5 | **Parse Script JSON** | Code (JS) | Cleans and safely parses Gemini's response |
+| 6 | **JSON2Video Submit** | HTTP Request | POSTs render job — Instagram Story format, Aria Neural voice |
+| 7 | **Wait 30s** | Wait | Initial pause before polling |
+| 8 | **JSON2Video Poll** | HTTP Request | GETs render status by project ID |
+| 9 | **Render Done?** | IF | Checks `movie.status === "done"`; loops back if not |
+| 10 | **Prep Publish** | Code (JS) | Extracts final video URL and caption |
+| 11 | **Telegram Post** | Telegram | Sends video + caption to your channel |
 
 ---
 
@@ -51,8 +114,11 @@ Set up the following credentials in n8n (**Settings → Credentials**):
 
 ### 3. Update the Telegram Chat ID
 
-In the **Telegram Post** node, replace the `chatId` value with your own channel or chat ID.  
-You can find your chat ID by messaging your bot and checking `https://api.telegram.org/bot<TOKEN>/getUpdates`.
+In the **Telegram Post** node, replace `chatId` with your own channel or chat ID.
+You can find yours by messaging your bot and checking:
+```
+https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
+```
 
 ### 4. Activate
 
@@ -62,19 +128,23 @@ Toggle the workflow to **Active**. It will run automatically at 9AM daily.
 
 ## 📦 Tech Stack
 
-- **n8n** — workflow automation
-- **The Hacker News RSS** — cybersecurity news source
-- **Google Gemini 2.5 Flash** — AI script & caption generation
-- **JSON2Video** — programmatic video rendering with AI voice (`en-US-AriaNeural`)
-- **Telegram Bot API** — video distribution
+| Service | Role |
+|---------|------|
+| **n8n** | Workflow automation & orchestration |
+| **The Hacker News RSS** | Cybersecurity news source |
+| **Google Gemini 2.5 Flash** | AI script & social caption generation |
+| **JSON2Video** | Programmatic video rendering |
+| **Aria Neural** (`en-US-AriaNeural`) | AI voiceover |
+| **Telegram Bot API** | Video distribution |
 
 ---
 
 ## ⚠️ Known Limitations
 
-- **Duplicate posts** — The workflow always picks the first RSS item. If the feed hasn't updated, the same article may be posted twice. Consider adding a deduplication step using n8n's static data or a database node.
-- **No render timeout** — The polling loop has no retry limit. If JSON2Video gets stuck, the workflow will run indefinitely. Add a counter node to cap retries (e.g., max 10 attempts).
-- **30s initial wait** — Complex renders may take longer. Consider increasing the wait or making the retry cap configurable.
+- **Duplicate posts** — always picks `items[0]` from the feed. If the feed hasn't refreshed, the same article gets posted twice. Add deduplication using n8n's static data or a database node.
+- **No render timeout** — the polling loop has no retry cap. If JSON2Video stalls, the workflow runs indefinitely. Add a counter node to limit retries (e.g. max 10 attempts).
+- **30s wait may be too short** — complex renders can take longer. Consider increasing to 60s or making it configurable.
+- **Silent parse failures** — if Gemini's JSON can't be parsed, `caption` and `title` fall back to empty strings silently.
 
 ---
 
